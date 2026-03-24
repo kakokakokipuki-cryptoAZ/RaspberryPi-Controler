@@ -2,90 +2,121 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Global Pico H Controller</title>
+    <title>Pico H Ultra Controller</title>
     <script src="https://unpkg.com"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f0f0f0; }
-        .card { background: white; margin: 20px auto; padding: 20px; width: 300px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        button { width: 80%; padding: 10px; margin: 5px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; }
-        input { padding: 8px; width: 70%; margin-bottom: 10px; }
-        #status { font-size: 0.8em; color: #666; }
+        body { font-family: 'Courier New', Courier, monospace; text-align: center; background: #1a1a1a; color: #0f0; }
+        .card { border: 2px solid #0f0; margin: 15px auto; padding: 15px; width: 320px; border-radius: 8px; }
+        button { width: 90%; padding: 12px; margin: 5px; cursor: pointer; border: 1px solid #0f0; background: #000; color: #0f0; font-weight: bold; }
+        button:hover { background: #0f0; color: #000; }
+        input { padding: 8px; width: 80%; background: #000; color: #0f0; border: 1px solid #0f0; margin-bottom: 10px; }
+        #status { font-size: 0.8em; }
+        .stats { font-size: 1.2em; text-align: left; padding-left: 20px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h2>🔑 接続設定</h2>
+    <h2>📡 CONNECTION</h2>
     <input type="text" id="secretKey" placeholder="自分専用の合言葉">
     <button onclick="saveKey()">合言葉を保存 (Cookie)</button>
-    <div id="status">未接続</div>
+    <button id="usbConnect">USB直接接続</button>
+    <div id="status">状態: 待機中...</div>
+</div>
+
+<div class="card stats">
+    <h2>📊 STATUS</h2>
+    <div>Lv: <span id="lvDisplay">1</span> / 2560</div>
+    <div>XP: <span id="xpDisplay">0</span> / <span id="nextXP">10</span></div>
+    <div>Mult: x<span id="multDisplay">1.00</span></div>
 </div>
 
 <div class="card">
-    <h2>🎮 遠隔操作</h2>
-    <p>XP: <span id="xpDisplay">0</span></p>
-    <button onclick="send('LED_ON')">LED点灯 (5XP)</button>
-    <button onclick="send('LED_OFF')">LED消灯</button>
-    <button onclick="send('PARTY_MODE')">🎉 パーティーモード</button>
+    <h2>🎮 CONTROL</h2>
+    <button onclick="execute('LED_ON')">LED ON (5XP)</button>
+    <button onclick="execute('PARTY_MODE')">🎉 PARTY (5XP)</button>
+    <button onclick="execute('EXEC_CODE', true)">💾 コード実行 (x1.1 Mult)</button>
+    <button onclick="resetData()" style="color:red; border-color:red;">データ初期化</button>
 </div>
 
 <script>
-    let client;
-    let xp = parseInt(getCookie("user_xp") || "0");
+    let port, client;
+    let xp = parseFloat(getCookie("user_xp") || "0");
+    let level = parseInt(getCookie("user_level") || "1");
+    let multiplier = parseFloat(getCookie("user_mult") || "1.0");
     let myKey = getCookie("pico_secret_key") || "";
 
-    // 起動時にCookieから復元
-    if(myKey) {
-        document.getElementById('secretKey').value = myKey;
-        connectMQTT(myKey);
-    }
+    // 初期化表示
+    if(myKey) connectMQTT(myKey);
     updateUI();
 
+    // 1. 接続処理
     function saveKey() {
         myKey = document.getElementById('secretKey').value;
         document.cookie = `pico_secret_key=${myKey}; max-age=2592000; path=/`;
-        alert("合言葉を保存しました！再接続します。");
         location.reload();
     }
 
-    function connectMQTT(key) {
-        document.getElementById('status').innerText = "接続中...";
-        // 公開ブローカーを使用 (WebSocket経由)
+    async function connectMQTT(key) {
         client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
-        
-        client.on('connect', () => {
-            document.getElementById('status').innerText = "✅ オンライン (世界中から操作可能)";
-            // 自分のトピックを購読（双方向用）
-            client.subscribe(`pico_h/${key}/status`);
-        });
+        client.on('connect', () => document.getElementById('status').innerText = "✅ Online (Wi-Fi)");
     }
 
-    function send(cmd) {
-        if(!client || !client.connected) {
-            alert("接続されていません！");
-            return;
+    document.getElementById('usbConnect').addEventListener('click', async () => {
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 115200 });
+            document.getElementById('status').innerText = "🔌 USB Connected";
+        } catch (e) { alert("USB接続失敗"); }
+    });
+
+    // 2. 実行 & レベリング
+    async function execute(cmd, isCode = false) {
+        // 送信処理 (USB優先、ダメならMQTT)
+        if (port && port.writable) {
+            const writer = port.writable.getWriter();
+            await writer.write(new TextEncoder().encode(cmd + "\n"));
+            writer.releaseLock();
+        } else if (client && client.connected) {
+            client.publish(`pico_h/${myKey}/cmd`, cmd);
+        } else {
+            alert("接続がありません"); return;
         }
-        const topic = `pico_h/${myKey}/cmd`;
-        client.publish(topic, cmd);
-        
-        // 進行度処理
-        if(cmd.includes('ON') || cmd.includes('PARTY')) xp += 5;
-        saveXP();
+
+        // XP計算
+        xp += 5 * multiplier;
+        if (isCode) multiplier *= 1.1;
+
+        // レベルアップ判定 (1.5倍ずつ増加)
+        let next = 10 * Math.pow(1.5, level - 1);
+        while (xp >= next && level < 2560) {
+            xp -= next;
+            level++;
+            next = 10 * Math.pow(1.5, level - 1);
+        }
+
+        saveAll();
         updateUI();
     }
 
-    function saveXP() {
+    // 3. データ管理
+    function saveAll() {
         document.cookie = `user_xp=${xp}; max-age=2592000; path=/`;
+        document.cookie = `user_level=${level}; max-age=2592000; path=/`;
+        document.cookie = `user_mult=${multiplier}; max-age=2592000; path=/`;
     }
 
-    function getCookie(name) {
-        let r = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-        return r ? r.pop() : '';
-    }
+    function getCookie(n){ let r=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)'); return r?r.pop():''; }
 
     function updateUI() {
-        document.getElementById('xpDisplay').innerText = xp;
+        document.getElementById('xpDisplay').innerText = Math.floor(xp);
+        document.getElementById('nextXP').innerText = Math.floor(10 * Math.pow(1.5, level - 1));
+        document.getElementById('lvDisplay').innerText = level;
+        document.getElementById('multDisplay').innerText = multiplier.toFixed(2);
+        if(myKey) document.getElementById('secretKey').value = myKey;
     }
+
+    function resetData() { if(confirm("リセット？")){ document.cookie.split(";").forEach(c => document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/")); location.reload(); } }
 </script>
 </body>
 </html>
