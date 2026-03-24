@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Global Pico H Controller</title>
+    <script src="https://unpkg.com"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #f0f0f0; }
+        .card { background: white; margin: 20px auto; padding: 20px; width: 300px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        button { width: 80%; padding: 10px; margin: 5px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; }
+        input { padding: 8px; width: 70%; margin-bottom: 10px; }
+        #status { font-size: 0.8em; color: #666; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🔑 接続設定</h2>
+    <input type="text" id="secretKey" placeholder="自分専用の合言葉">
+    <button onclick="saveKey()">合言葉を保存 (Cookie)</button>
+    <div id="status">未接続</div>
+</div>
+
+<div class="card">
+    <h2>🎮 遠隔操作</h2>
+    <p>XP: <span id="xpDisplay">0</span></p>
+    <button onclick="send('LED_ON')">LED点灯 (5XP)</button>
+    <button onclick="send('LED_OFF')">LED消灯</button>
+    <button onclick="send('PARTY_MODE')">🎉 パーティーモード</button>
+</div>
+
+<script>
+    let client;
+    let xp = parseInt(getCookie("user_xp") || "0");
+    let myKey = getCookie("pico_secret_key") || "";
+
+    // 起動時にCookieから復元
+    if(myKey) {
+        document.getElementById('secretKey').value = myKey;
+        connectMQTT(myKey);
+    }
+    updateUI();
+
+    function saveKey() {
+        myKey = document.getElementById('secretKey').value;
+        document.cookie = `pico_secret_key=${myKey}; max-age=2592000; path=/`;
+        alert("合言葉を保存しました！再接続します。");
+        location.reload();
+    }
+
+    function connectMQTT(key) {
+        document.getElementById('status').innerText = "接続中...";
+        // 公開ブローカーを使用 (WebSocket経由)
+        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+        
+        client.on('connect', () => {
+            document.getElementById('status').innerText = "✅ オンライン (世界中から操作可能)";
+            // 自分のトピックを購読（双方向用）
+            client.subscribe(`pico_h/${key}/status`);
+        });
+    }
+
+    function send(cmd) {
+        if(!client || !client.connected) {
+            alert("接続されていません！");
+            return;
+        }
+        const topic = `pico_h/${myKey}/cmd`;
+        client.publish(topic, cmd);
+        
+        // 進行度処理
+        if(cmd.includes('ON') || cmd.includes('PARTY')) xp += 5;
+        saveXP();
+        updateUI();
+    }
+
+    function saveXP() {
+        document.cookie = `user_xp=${xp}; max-age=2592000; path=/`;
+    }
+
+    function getCookie(name) {
+        let r = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return r ? r.pop() : '';
+    }
+
+    function updateUI() {
+        document.getElementById('xpDisplay').innerText = xp;
+    }
+</script>
+</body>
+</html>
