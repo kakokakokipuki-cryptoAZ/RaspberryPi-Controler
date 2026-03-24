@@ -1,63 +1,135 @@
-let commandQueue = JSON.parse(getCookie("cmd_queue") || "[]");
-let savedCodes = JSON.parse(getCookie("saved_codes") || "[]"); // 最大10個
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Pico H Controller</title>
+    <script src="https://unpkg.com"></script>
+    <style>
+        body { font-family: monospace; background: #1a1a1a; color: #0f0; text-align: center; }
+        .card { border: 2px solid #0f0; margin: 10px auto; padding: 15px; width: 90%; max-width: 400px; background: #000; }
+        button { width: 90%; padding: 10px; margin: 5px; cursor: pointer; border: 1px solid #0f0; background: #000; color: #0f0; }
+        input, textarea { width: 80%; padding: 10px; background: #000; color: #0f0; border: 1px solid #0f0; }
+        #titleDisplay { font-size: 1.2em; color: #f0f; margin-bottom: 10px; }
+        .slot-item { border-bottom: 1px dashed #0f0; padding: 5px; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
 
-// --- 1. コマンド送信ロジック（未接続時はキューに溜める） ---
-async function execute(cmd, isCode = false) {
-    let sent = false;
+<div class="card">
+    <div id="titleDisplay">称号: 迷える子羊</div>
+    Lv: <span id="lvDisplay">1</span> | XP: <span id="xpDisplay">0</span> / <span id="nextXP">10</span><br>
+    Mult: x<span id="multDisplay">1.00</span>
+</div>
 
-    // 接続チェック
-    if ((port && port.writable) || (client && client.connected)) {
-        await sendToDevice(cmd);
-        sent = true;
-    } else {
-        // 未接続なら「予約」リストに入れる
-        commandQueue.push(cmd);
-        saveCookie("cmd_queue", JSON.stringify(commandQueue));
-        document.getElementById('status').innerText = `⏳ 予約中 (${commandQueue.length}件)`;
-    }
+<div class="card">
+    <input type="text" id="secretKey" placeholder="合言葉">
+    <button onclick="saveKey()">合言葉保存</button>
+    <div id="status">待機中</div>
+</div>
 
-    // XP計算（接続に関係なく進行）
-    processXP(isCode);
-}
+<div class="card">
+    <button onclick="execute('LED_ON')">LED ON</button>
+    <textarea id="codeEditor" placeholder="コード入力..." rows="3"></textarea>
+    <button onclick="execute(document.getElementById('codeEditor').value, true)">💾 コード実行</button>
+    <button onclick="saveCurrentCode()">スロット保存</button>
+    <div>スロット: <span id="slotCount">0/10</span></div>
+    <div id="codeList"></div>
+</div>
 
-// --- 2. 接続された瞬間に一気に放出（反映） ---
-async function flushQueue() {
-    if (commandQueue.length === 0) return;
-    
-    document.getElementById('status').innerText = "🚀 予約コマンドを同期中...";
-    for (let cmd of commandQueue) {
-        await sendToDevice(cmd);
-        // 少し間隔を空けて送信（Picoのパンク防止）
-        await new Promise(r => setTimeout(r, 100));
-    }
-    
-    commandQueue = [];
-    saveCookie("cmd_queue", "[]");
-    document.getElementById('status').innerText = "✅ 同期完了！";
-}
+<script>
+    // --- ここからがプログラム (JavaScript) ---
+    let port, client;
+    let xp = parseFloat(getCookie("user_xp") || "0");
+    let level = parseInt(getCookie("user_level") || "1");
+    let multiplier = parseFloat(getCookie("user_mult") || "1.0");
+    let myKey = getCookie("pico_secret_key") || "";
+    let commandQueue = JSON.parse(getCookie("cmd_queue") || "[]");
+    let savedCodes = JSON.parse(getCookie("saved_codes") || "[]");
 
-// --- 3. コード保存機能 (10個まで) ---
-function saveCurrentCode() {
-    const codeArea = document.getElementById('codeEditor');
-    const code = codeArea.value;
-    if (!code) return;
+    const titles = ["迷える子羊", "見習い", "Lチカ師", "抵抗マニア", "配線工", "傍受者", "守護者", "支配者", "解体師", "鬼"];
 
-    if (savedCodes.length >= 10) {
-        alert("スロットがいっぱいです（最大10個）");
-        return;
-    }
-
-    savedCodes.push({ id: Date.now(), content: code });
-    saveCookie("saved_codes", JSON.stringify(savedCodes));
+    if(myKey) connectMQTT(myKey);
+    updateUI();
     renderSavedCodes();
-}
 
-function renderSavedCodes() {
-    const list = document.getElementById('codeList');
-    list.innerHTML = savedCodes.map((c, i) => `
-        <div>
-            Slot ${i+1}: <button onclick="loadCode(${i})">読込</button>
-            <button onclick="deleteCode(${i})" style="color:red">消</button>
-        </div>
-    `).join('');
-}
+    function saveKey() {
+        myKey = document.getElementById('secretKey').value;
+        saveCookie("pico_secret_key", myKey);
+        location.reload();
+    }
+
+    async function connectMQTT(key) {
+        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+        client.on('connect', () => {
+            document.getElementById('status').innerText = "✅ Online";
+            flushQueue();
+        });
+    }
+
+    async function execute(cmd, isCode = false) {
+        if (!cmd) return;
+        if (client && client.connected) {
+            client.publish(`pico_h/${myKey}/cmd`, cmd);
+        } else {
+            commandQueue.push(cmd);
+            saveCookie("cmd_queue", JSON.stringify(commandQueue));
+            document.getElementById('status').innerText = `⏳ 予約中(${commandQueue.length})`;
+        }
+        processXP(isCode);
+    }
+
+    function processXP(isCode) {
+        xp += 5 * multiplier;
+        if (isCode) multiplier *= 1.1;
+        let next = 10 * Math.pow(1.5, level - 1);
+        while (xp >= next && level < 2560) {
+            xp -= next; level++;
+            next = 10 * Math.pow(1.5, level - 1);
+        }
+        saveAll(); updateUI();
+    }
+
+    async function flushQueue() {
+        if (commandQueue.length === 0) return;
+        for (let cmd of commandQueue) {
+            if (client && client.connected) client.publish(`pico_h/${myKey}/cmd`, cmd);
+            await new Promise(r => setTimeout(r, 100));
+        }
+        commandQueue = [];
+        saveCookie("cmd_queue", "[]");
+    }
+
+    function saveCurrentCode() {
+        const code = document.getElementById('codeEditor').value;
+        const max = (level >= 500) ? 12 : 10;
+        if (!code || savedCodes.length >= max) return;
+        savedCodes.push({ content: code });
+        saveCookie("saved_codes", JSON.stringify(savedCodes));
+        renderSavedCodes();
+    }
+
+    function renderSavedCodes() {
+        const max = (level >= 500) ? 12 : 10;
+        document.getElementById('slotCount').innerText = `${savedCodes.length}/${max}`;
+        document.getElementById('codeList').innerHTML = savedCodes.map((c, i) => `
+            <div class="slot-item">
+                <span>Slot ${i+1}</span>
+                <button style="width:auto" onclick="loadCode(${i})">読</button>
+            </div>
+        `).join('');
+    }
+
+    function loadCode(i) { document.getElementById('codeEditor').value = savedCodes[i].content; }
+    function saveAll() { saveCookie("user_xp", xp); saveCookie("user_level", level); saveCookie("user_mult", multiplier); }
+    function saveCookie(n, v) { document.cookie = `${n}=${v}; max-age=2592000; path=/`; }
+    function getCookie(n){ let r=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)'); return r?r.pop():''; }
+    function updateUI() {
+        document.getElementById('xpDisplay').innerText = Math.floor(xp);
+        document.getElementById('nextXP').innerText = Math.floor(10 * Math.pow(1.5, level - 1));
+        document.getElementById('lvDisplay').innerText = level;
+        document.getElementById('multDisplay').innerText = multiplier.toFixed(2);
+        document.getElementById('titleDisplay').innerText = "称号: " + (titles[Math.floor(level/10)] || "伝説の神");
+    }
+</script>
+</body>
+</html>
