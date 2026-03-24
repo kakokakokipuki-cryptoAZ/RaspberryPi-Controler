@@ -2,134 +2,261 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Pico H Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico H Genesis - The Forbidden Interface</title>
     <script src="https://unpkg.com"></script>
+    <link href="https://fonts.googleapis.com" rel="stylesheet">
     <style>
-        body { font-family: monospace; background: #1a1a1a; color: #0f0; text-align: center; }
-        .card { border: 2px solid #0f0; margin: 10px auto; padding: 15px; width: 90%; max-width: 400px; background: #000; }
-        button { width: 90%; padding: 10px; margin: 5px; cursor: pointer; border: 1px solid #0f0; background: #000; color: #0f0; }
-        input, textarea { width: 80%; padding: 10px; background: #000; color: #0f0; border: 1px solid #0f0; }
-        #titleDisplay { font-size: 1.2em; color: #f0f; margin-bottom: 10px; }
-        .slot-item { border-bottom: 1px dashed #0f0; padding: 5px; display: flex; justify-content: space-between; }
+        body { font-family: 'Share Tech Mono', monospace; background: #050505; color: #00ff41; text-align: center; padding-bottom: 50px; margin: 0; transition: 0.5s; overflow-x: hidden; }
+        .card { border: 1px solid #00ff41; margin: 10px auto; padding: 15px; width: 92%; max-width: 460px; background: rgba(0, 10, 0, 0.9); border-radius: 4px; box-shadow: 0 0 10px rgba(0, 255, 65, 0.1); }
+        button { padding: 10px; margin: 5px; cursor: pointer; border: 1px solid #00ff41; background: #000; color: #00ff41; font-family: inherit; font-weight: bold; text-transform: uppercase; }
+        button:hover { background: #00ff41; color: #000; box-shadow: 0 0 15px #00ff41; }
+        textarea, input { width: 85%; padding: 10px; background: #000; color: #00ff41; border: 1px solid #00ff41; margin: 5px; font-family: inherit; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; text-align: left; gap: 8px; font-size: 0.9em; border-top: 1px solid #00ff41; padding-top: 10px; margin-top: 10px; }
+        #titleDisplay { font-size: 1.5em; color: #00ffff; text-shadow: 0 0 15px #00ffff; min-height: 1.6em; margin-bottom: 10px; letter-spacing: 1px; }
+        .list-item { border-bottom: 1px solid #111; padding: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.8em; }
+        .del-btn { color: #ff0055; border-color: #ff0055; font-size: 0.7em; padding: 2px 6px; }
+        #status { font-weight: bold; min-height: 1.2em; margin-bottom: 10px; letter-spacing: 1px; }
+        .abyss { filter: invert(1) grayscale(1) !important; background: #fff !important; color: #000 !important; }
+        .abyss .card, .abyss button, .abyss textarea, .abyss input { border-color: #000 !important; background: #eee !important; color: #000 !important; }
+        .abyss #titleDisplay { color: #f00 !important; text-shadow: none !important; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <div id="titleDisplay">称号: 迷える子羊</div>
-    Lv: <span id="lvDisplay">1</span> | XP: <span id="xpDisplay">0</span> / <span id="nextXP">10</span><br>
-    Mult: x<span id="multDisplay">1.00</span>
+    <div id="titleDisplay">称号: 権限取得中...</div>
+    <div class="stats-grid">
+        <div>LV: <span id="lvDisplay">1</span> / <span id="maxLvDisplay">2560</span></div>
+        <div>MULT: x<span id="multDisplay">1.00</span></div>
+        <div>XP: <span id="xpDisplay">0</span></div>
+        <div>NEXT: <span id="nextXP">10</span></div>
+        <div style="grid-column: span 2; border-top: 1px dashed #00ff41; padding-top: 5px;">
+            🔑 送信の鍵: <span id="sendCountDisplay">0</span> / 100
+        </div>
+    </div>
+</div>
+
+<div id="genesisAltar" class="card" style="display:none; border-color: #ff0055; background: rgba(255,0,0,0.1);">
+    <h3 style="color:#ff0055;">⚡ 創神の祭壇 ⚡</h3>
+    <p style="font-size:0.7em;">100,000 XP & 送信の鍵(100回)を捧げよ</p>
+    <button onclick="releaseGenesis()" style="color:#ff0055; border-color:#ff0055;">創神の鍵を起動</button>
+</div>
+
+<div id="limitBreakCard" class="card" style="display:none; border-color: #ff0055;">
+    <h3 style="color:#ff0055;">⚡ 限界突破 ⚡</h3>
+    <p style="font-size:0.8em;">必要XP: <span id="breakCostDisplay">10000</span></p>
+    <button onclick="limitBreak()" style="color:#ff0055; border-color:#ff0055;">上限解放 (+10 LV)</button>
 </div>
 
 <div class="card">
-    <input type="text" id="secretKey" placeholder="合言葉">
-    <button onclick="saveKey()">合言葉保存</button>
-    <div id="status">待機中</div>
+    <h3>[ 📡 CONNECTION ]</h3>
+    <input type="text" id="secretKey" placeholder="認証キーを入力">
+    <button onclick="saveKey()">保存</button>
+    <div id="status">STATUS: OFFLINE</div>
+    <div id="queueList"></div>
 </div>
 
 <div class="card">
-    <button onclick="execute('LED_ON')">LED ON</button>
-    <textarea id="codeEditor" placeholder="コード入力..." rows="3"></textarea>
-    <button onclick="execute(document.getElementById('codeEditor').value, true)">💾 コード実行</button>
-    <button onclick="saveCurrentCode()">スロット保存</button>
-    <div>スロット: <span id="slotCount">0/10</span></div>
-    <div id="codeList"></div>
+    <h3>[ 🎮 TERMINAL ]</h3>
+    <textarea id="codeEditor" placeholder="Pythonコードを入力(3文字以上)..." rows="5"></textarea>
+    <button onclick="runInputCode()">📡 射出 (XP/MULT+)</button>
+    <button onclick="saveCurrentCode()">💾 保存</button>
 </div>
+
+<div class="card">
+    <h3>[ 💾 STORAGE (<span id="slotCount">0/10</span>) ]</h3>
+    <div id="codeSlots"></div>
+</div>
+
+<div class="card">
+    <h3>[ 🛠️ CUSTOM ]</h3>
+    <button onclick="addCustomButton()">+ 生成</button>
+    <div id="customButtons"></div>
+</div>
+
+<button onclick="resetData()" style="color:#222; border:none; background:none; font-size: 9px; margin-top: 20px;">[ INITIALIZE SYSTEM ]</button>
 
 <script>
-    // --- ここからがプログラム (JavaScript) ---
-    let port, client;
+    // --- Data Persistence ---
     let xp = parseFloat(getCookie("user_xp") || "0");
     let level = parseInt(getCookie("user_level") || "1");
+    let maxLevel = parseInt(getCookie("user_max_level") || "2560");
     let multiplier = parseFloat(getCookie("user_mult") || "1.0");
+    let breakCount = parseInt(getCookie("break_count") || "0");
+    let sendCount = parseInt(getCookie("send_count") || "0");
+    let isFallen = getCookie("is_fallen") === "true";
+    let hasGenesisKey = getCookie("has_genesis") === "true";
     let myKey = getCookie("pico_secret_key") || "";
     let commandQueue = JSON.parse(getCookie("cmd_queue") || "[]");
     let savedCodes = JSON.parse(getCookie("saved_codes") || "[]");
+    let customBtns = JSON.parse(getCookie("custom_btns") || "[]");
 
-    const titles = ["迷える子羊", "見習い", "Lチカ師", "抵抗マニア", "配線工", "傍受者", "守護者", "支配者", "解体師", "鬼"];
-
-    if(myKey) connectMQTT(myKey);
-    updateUI();
-    renderSavedCodes();
-
-    function saveKey() {
-        myKey = document.getElementById('secretKey').value;
-        saveCookie("pico_secret_key", myKey);
-        location.reload();
+    // --- Title Logic ---
+    function getTitle(lv) {
+        if (lv === -6666) return "☠️ 深層の最底：虚無 ☠️";
+        if (hasGenesisKey && lv >= 2860) return "🌌 創神：世界を編み直す者";
+        if (lv >= 2860) return "真理を知り得る者";
+        if (lv >= 2760) return "偽りを正す者";
+        if (lv >= 2660) return "真の終焉を待つ者";
+        if (lv >= 2560) return "万物の超越者";
+        if (lv >= 2200) return "理の外側に立つ者";
+        if (lv >= 1900) return "並行世界の観測者";
+        if (lv >= 1600) return "概念の書き換え主";
+        if (lv >= 1300) return "虚無を統べる演算機";
+        if (lv >= 1000) return "次元のプロトコル";
+        if (lv >= 700) return "深層の監視者";
+        if (lv >= 400) return "システム・アーキテクト";
+        if (lv >= 100) return "化身を崩す者";
+        return "修練者";
     }
 
-    async function connectMQTT(key) {
-        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
-        client.on('connect', () => {
-            document.getElementById('status').innerText = "✅ Online";
-            flushQueue();
-        });
+    // --- Network ---
+    let client = myKey ? mqtt.connect('wss://broker.emqx.io:8084/mqtt') : null;
+    if(client) client.on('connect', () => { 
+        document.getElementById('status').innerText = "STATUS: ONLINE"; 
+        document.getElementById('status').style.color = "#00ff41";
+        flushQueue(); 
+    });
+
+    // --- Core Action ---
+    function runInputCode() {
+        const c = document.getElementById('codeEditor').value.trim();
+        // Strict Check: Length & Brackets
+        if (c.length < 3 || (c.match(/\(/g)||[]).length !== (c.match(/\)/g)||[]).length) {
+            document.body.style.background = "#400";
+            setTimeout(() => document.body.style.background = isFallen ? "#fff" : "#050505", 200);
+            return; 
+        }
+        sendCount++;
+        saveCookie("send_count", sendCount);
+        execute(c, true);
     }
 
     async function execute(cmd, isCode = false) {
-        if (!cmd) return;
         if (client && client.connected) {
             client.publish(`pico_h/${myKey}/cmd`, cmd);
         } else {
-            commandQueue.push(cmd);
+            commandQueue.push({ id: Date.now(), cmd: cmd });
             saveCookie("cmd_queue", JSON.stringify(commandQueue));
-            document.getElementById('status').innerText = `⏳ 予約中(${commandQueue.length})`;
+            renderQueue();
         }
-        processXP(isCode);
-    }
-
-    function processXP(isCode) {
+        
+        // Reward Logic
         xp += 5 * multiplier;
         if (isCode) multiplier *= 1.1;
-        let next = 10 * Math.pow(1.5, level - 1);
-        while (xp >= next && level < 2560) {
-            xp -= next; level++;
-            next = 10 * Math.pow(1.5, level - 1);
+
+        // The Fall Logic
+        if (!isFallen && level >= 2860 && !hasGenesisKey) {
+            isFallen = true; level = -6666; saveCookie("is_fallen", "true");
+            alert("⚠ 真理への到達は拒絶されました。あなたは深層へ堕とされます。");
+        }
+
+        // Level Up Logic (Disabled in Abyss)
+        if (!isFallen) {
+            let next = 10 * Math.pow(1.5, level - 1);
+            while (xp >= next && level < maxLevel) {
+                xp -= next; level++;
+                next = 10 * Math.pow(1.5, level - 1);
+                document.body.style.background = "#00ff41";
+                setTimeout(() => document.body.style.background = "#050505", 100);
+            }
         }
         saveAll(); updateUI();
     }
 
-    async function flushQueue() {
-        if (commandQueue.length === 0) return;
-        for (let cmd of commandQueue) {
-            if (client && client.connected) client.publish(`pico_h/${myKey}/cmd`, cmd);
-            await new Promise(r => setTimeout(r, 100));
+    function limitBreak() {
+        let cost = 10000 * Math.pow(1.5, breakCount);
+        if (xp >= cost) {
+            xp -= cost; maxLevel += 10; breakCount++;
+            saveCookie("user_max_level", maxLevel);
+            saveCookie("break_count", breakCount);
+            saveAll(); updateUI();
         }
-        commandQueue = [];
-        saveCookie("cmd_queue", "[]");
+    }
+
+    function releaseGenesis() {
+        if (level === -6666 && xp >= 100000 && sendCount >= 100) {
+            xp -= 100000; level = 2860; isFallen = false; hasGenesisKey = true;
+            saveCookie("is_fallen", "false"); saveCookie("has_genesis", "true"); saveCookie("user_level", 2860);
+            alert("🔑 創神の鍵を起動。理を再構築しました。");
+            saveAll(); updateUI();
+        } else {
+            alert("条件未達成。100,000 XP と 送信の鍵が必要です。");
+        }
+    }
+
+    // --- UI Utility ---
+    function updateUI() {
+        document.getElementById('lvDisplay').innerText = level;
+        document.getElementById('maxLvDisplay').innerText = maxLevel;
+        document.getElementById('xpDisplay').innerText = Math.floor(xp);
+        document.getElementById('nextXP').innerText = (level >= maxLevel && !isFallen) ? "MAX" : Math.floor(10 * Math.pow(1.5, level - 1));
+        document.getElementById('multDisplay').innerText = multiplier.toFixed(2);
+        document.getElementById('sendCountDisplay').innerText = sendCount;
+        document.getElementById('titleDisplay').innerText = "称号: " + getTitle(level);
+        
+        document.getElementById('limitBreakCard').style.display = (level >= maxLevel && !isFallen) ? "block" : "none";
+        document.getElementById('breakCostDisplay').innerText = Math.ceil(10000 * Math.pow(1.5, breakCount));
+        document.getElementById('genesisAltar').style.display = (level === -6666) ? "block" : "none";
+        
+        if (isFallen) document.body.classList.add('abyss');
+        else document.body.classList.remove('abyss');
+        
+        renderSavedCodes(); renderCustomButtons();
+    }
+
+    function renderQueue() {
+        const div = document.getElementById('queueList');
+        div.innerHTML = commandQueue.length ? "<strong>QUEUE:</strong>" : "";
+        commandQueue.forEach((q, i) => {
+            div.innerHTML += `<div class="list-item"><span>${q.cmd.substring(0,10)}..</span><button class="del-btn" onclick="commandQueue.splice(${i},1);saveCookie('cmd_queue',JSON.stringify(commandQueue));renderQueue()">X</button></div>`;
+        });
+    }
+
+    async function flushQueue() {
+        if (!client || !client.connected) return;
+        for (let q of commandQueue) { client.publish(`pico_h/${myKey}/cmd`, q.cmd); await new Promise(r => setTimeout(r, 100)); }
+        commandQueue = []; saveCookie("cmd_queue", "[]"); renderQueue();
     }
 
     function saveCurrentCode() {
-        const code = document.getElementById('codeEditor').value;
-        const max = (level >= 500) ? 12 : 10;
-        if (!code || savedCodes.length >= max) return;
-        savedCodes.push({ content: code });
-        saveCookie("saved_codes", JSON.stringify(savedCodes));
-        renderSavedCodes();
+        const c = document.getElementById('codeEditor').value.trim();
+        const maxS = (level >= 500) ? 12 : 10;
+        if (c && savedCodes.length < maxS) { savedCodes.push({content:c}); saveCookie('saved_codes', JSON.stringify(savedCodes)); updateUI(); }
     }
 
     function renderSavedCodes() {
-        const max = (level >= 500) ? 12 : 10;
-        document.getElementById('slotCount').innerText = `${savedCodes.length}/${max}`;
-        document.getElementById('codeList').innerHTML = savedCodes.map((c, i) => `
-            <div class="slot-item">
-                <span>Slot ${i+1}</span>
-                <button style="width:auto" onclick="loadCode(${i})">読</button>
-            </div>
-        `).join('');
+        const maxS = (level >= 500) ? 12 : 10;
+        document.getElementById('slotCount').innerText = `${savedCodes.length}/${maxS}`;
+        document.getElementById('codeSlots').innerHTML = savedCodes.map((c,i) => `
+            <div class="list-item"><span>SLOT [${i+1}]</span><div>
+            <button style="padding:4px 8px" onclick="document.getElementById('codeEditor').value=savedCodes[${i}].content">LOAD</button>
+            <button class="del-btn" onclick="savedCodes.splice(${i},1);saveCookie('saved_codes',JSON.stringify(savedCodes));updateUI()">DEL</button>
+            </div></div>`).join('');
     }
 
-    function loadCode(i) { document.getElementById('codeEditor').value = savedCodes[i].content; }
-    function saveAll() { saveCookie("user_xp", xp); saveCookie("user_level", level); saveCookie("user_mult", multiplier); }
-    function saveCookie(n, v) { document.cookie = `${n}=${v}; max-age=2592000; path=/`; }
-    function getCookie(n){ let r=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)'); return r?r.pop():''; }
-    function updateUI() {
-        document.getElementById('xpDisplay').innerText = Math.floor(xp);
-        document.getElementById('nextXP').innerText = Math.floor(10 * Math.pow(1.5, level - 1));
-        document.getElementById('lvDisplay').innerText = level;
-        document.getElementById('multDisplay').innerText = multiplier.toFixed(2);
-        document.getElementById('titleDisplay').innerText = "称号: " + (titles[Math.floor(level/10)] || "伝説の神");
+    function addCustomButton() {
+        const n = prompt("BUTTON NAME:"), c = prompt("COMMAND:");
+        if(n && c) { customBtns.push({n, c}); saveCookie("custom_btns", JSON.stringify(customBtns)); updateUI(); }
     }
+
+    function renderCustomButtons() {
+        document.getElementById('customButtons').innerHTML = customBtns.map((b,i) => `
+            <div style="display:inline-block; margin:2px;"><button onclick="execute('${b.c}',true)">${b.n}</button><br>
+            <span onclick="customBtns.splice(${i},1);saveCookie('custom_btns',JSON.stringify(customBtns));updateUI()" style="color:#ff0055;cursor:pointer;font-size:10px">[DEL]</span>
+            </div>`).join('');
+    }
+
+    // --- System ---
+    function saveKey() { saveCookie("pico_secret_key", document.getElementById('secretKey').value); location.reload(); }
+    function saveAll() { saveCookie("user_xp", xp); saveCookie("user_level", level); saveCookie("user_mult", multiplier); saveCookie("send_count", sendCount); }
+    function saveCookie(n,v) { document.cookie = `${n}=${v}; max-age=2592000; path=/`; }
+    function getCookie(n){ let r=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)'); return r?r.pop():''; }
+    function resetData() { if(confirm("INITIALIZE ALL?")) { document.cookie.split(";").forEach(c => document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/")); location.reload(); } }
+
+    updateUI();
+    renderQueue();
 </script>
 </body>
 </html>
